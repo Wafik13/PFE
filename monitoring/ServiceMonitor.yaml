@@ -1,0 +1,194 @@
+# ServiceMonitor configurations for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backend-service-monitor
+  namespace: monitoring
+  labels:
+    app: backend
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: backend
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - default
+    - backend
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mqtt-gateway-monitor
+  namespace: monitoring
+  labels:
+    app: mqtt-gateway
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: mqtt-gateway
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'mqtt_.*'
+      targetLabel: component
+      replacement: 'mqtt-gateway'
+  namespaceSelector:
+    matchNames:
+    - iot
+    - default
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ml-inference-monitor
+  namespace: monitoring
+  labels:
+    app: ml-inference-service
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: ml-inference-service
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 15s
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'ml_.*'
+      targetLabel: component
+      replacement: 'ml-inference'
+  namespaceSelector:
+    matchNames:
+    - mlops
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mlflow-server-monitor
+  namespace: monitoring
+  labels:
+    app: mlflow-server
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: mlflow-server
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 60s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - mlops
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: frontend-monitor
+  namespace: monitoring
+  labels:
+    app: frontend
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: frontend
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 60s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - default
+    - frontend
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: websocket-monitor
+  namespace: monitoring
+  labels:
+    app: websocket-service
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: websocket-service
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+    scrapeTimeout: 10s
+    metricRelabelings:
+    - sourceLabels: [__name__]
+      regex: 'websocket_.*'
+      targetLabel: component
+      replacement: 'websocket'
+  namespaceSelector:
+    matchNames:
+    - default
+    - backend
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-monitor
+  namespace: monitoring
+  labels:
+    app: redis
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: redis-feature-store
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - mlops
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-monitor
+  namespace: monitoring
+  labels:
+    app: postgres
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: postgres-mlflow
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - mlops

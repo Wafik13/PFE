@@ -1,0 +1,234 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-config
+  namespace: mlops
+data:
+  tracking-uri: "http://mlflow-server:5000"
+  artifact-root: "s3://mlflow-artifacts"
+  default-experiment: "iip-ml-models"
+  backend-store-uri: "postgresql://mlflow:password@postgres:5432/mlflow"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-server
+  namespace: mlops
+  labels:
+    app: mlflow-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow-server
+  template:
+    metadata:
+      labels:
+        app: mlflow-server
+    spec:
+      containers:
+      - name: mlflow-server
+        image: mlflow/mlflow:2.8.1
+        ports:
+        - containerPort: 5000
+        command:
+        - mlflow
+        - server
+        - --host
+        - "0.0.0.0"
+        - --port
+        - "5000"
+        - --backend-store-uri
+        - "$(BACKEND_STORE_URI)"
+        - --default-artifact-root
+        - "$(ARTIFACT_ROOT)"
+        - --serve-artifacts
+        env:
+        - name: BACKEND_STORE_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: backend-store-uri
+        - name: ARTIFACT_ROOT
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: artifact-root
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: mlflow-secrets
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mlflow-secrets
+              key: aws-secret-access-key
+        - name: MLFLOW_S3_ENDPOINT_URL
+          valueFrom:
+            secretKeyRef:
+              name: mlflow-secrets
+              key: s3-endpoint-url
+              optional: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-server
+  namespace: mlops
+  labels:
+    app: mlflow-server
+spec:
+  selector:
+    app: mlflow-server
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mlflow-secrets
+  namespace: mlops
+type: Opaque
+data:
+  # Base64 encoded values - replace with actual credentials
+  aws-access-key-id: bWxmbG93LWFjY2Vzcy1rZXk=  # mlflow-access-key
+  aws-secret-access-key: bWxmbG93LXNlY3JldC1rZXk=  # mlflow-secret-key
+  s3-endpoint-url: aHR0cDovL21pbmlvOjkwMDA=  # http://minio:9000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-mlflow
+  namespace: mlops
+  labels:
+    app: postgres-mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-mlflow
+  template:
+    metadata:
+      labels:
+        app: postgres-mlflow
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "mlflow"
+        - name: POSTGRES_USER
+          value: "mlflow"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-mlflow-secret
+              key: password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-mlflow-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: mlops
+  labels:
+    app: postgres-mlflow
+spec:
+  selector:
+    app: postgres-mlflow
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-mlflow-secret
+  namespace: mlops
+type: Opaque
+data:
+  password: cGFzc3dvcmQ=  # password (base64 encoded)
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-mlflow-pvc
+  namespace: mlops
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-data-pvc
+  namespace: mlops
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlops
+  labels:
+    name: mlops
+    istio-injection: enabled

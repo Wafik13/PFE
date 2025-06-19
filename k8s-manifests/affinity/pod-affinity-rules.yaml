@@ -1,0 +1,725 @@
+# Pod Affinity and Anti-Affinity Rules for High Availability
+# This file defines affinity rules to ensure proper distribution of pods across nodes and zones
+
+---
+# PostgreSQL Primary-Replica Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-affinity-config
+  namespace: iip-infrastructure
+  labels:
+    app.kubernetes.io/name: postgresql-affinity
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: iip-platform
+data:
+  primary-affinity.yaml: |
+    # PostgreSQL Primary Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/database
+              operator: In
+              values: ["true"]
+            - key: kubernetes.io/arch
+              operator: In
+              values: ["amd64"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["m5.xlarge", "m5.2xlarge"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["postgresql"]
+            - key: app.kubernetes.io/component
+              operator: In
+              values: ["primary", "read-replica"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["postgresql"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "database-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "high-memory"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  
+  replica-affinity.yaml: |
+    # PostgreSQL Read Replica Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/database
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2b", "us-west-2c"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["postgresql"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["postgresql"]
+            topologyKey: topology.kubernetes.io/zone
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["redis", "rabbitmq"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "database-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# Redis Cluster Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-affinity-config
+  namespace: iip-infrastructure
+  labels:
+    app.kubernetes.io/name: redis-affinity
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: iip-platform
+data:
+  master-affinity.yaml: |
+    # Redis Master Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/cache
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["r5.large", "r5.xlarge"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["redis"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["redis"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "cache-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "high-memory"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  
+  replica-affinity.yaml: |
+    # Redis Replica Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/cache
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2b", "us-west-2c"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["redis"]
+          topologyKey: kubernetes.io/hostname
+    tolerations:
+    - key: "cache-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# MinIO Distributed Storage Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: minio-affinity-config
+  namespace: iip-infrastructure
+  labels:
+    app.kubernetes.io/name: minio-affinity
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: iip-platform
+data:
+  distributed-affinity.yaml: |
+    # MinIO Distributed Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/storage
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["i3.large", "i3.xlarge", "i3.2xlarge"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b", "us-west-2c"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["minio"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["minio"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "storage-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "high-io"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# SCADA Service Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scada-affinity-config
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-affinity
+    app.kubernetes.io/component: scada
+    app.kubernetes.io/part-of: iip-platform
+data:
+  scada-affinity.yaml: |
+    # SCADA Service Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/application
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["c5.large", "c5.xlarge"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["scada-service"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["scada-service"]
+            topologyKey: topology.kubernetes.io/zone
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["redis", "rabbitmq"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "application-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "real-time"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# ML Inference Service Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-inference-affinity-config
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: ml-inference-affinity
+    app.kubernetes.io/component: ml-inference
+    app.kubernetes.io/part-of: iip-platform
+data:
+  ml-inference-affinity.yaml: |
+    # ML Inference Service Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/ml-inference
+              operator: In
+              values: ["true"]
+            - key: accelerator
+              operator: In
+              values: ["nvidia-tesla-t4", "nvidia-tesla-v100", "nvidia-a100"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b"]
+        - weight: 80
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["p3.2xlarge", "p3.8xlarge", "g4dn.xlarge"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["ml-inference"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["ml-inference"]
+            topologyKey: topology.kubernetes.io/zone
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["feast", "mlflow"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "gpu-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "ml-inference"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# Analytics Service Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-affinity-config
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: analytics-affinity
+    app.kubernetes.io/component: analytics
+    app.kubernetes.io/part-of: iip-platform
+data:
+  analytics-affinity.yaml: |
+    # Analytics Service Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/application
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["m5.large", "m5.xlarge", "c5.xlarge"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["analytics-service"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["analytics-service"]
+            topologyKey: topology.kubernetes.io/zone
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["influxdb", "postgresql"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "application-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+    - key: "compute-intensive"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# MLOps Components Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlops-affinity-config
+  namespace: iip-mlops
+  labels:
+    app.kubernetes.io/name: mlops-affinity
+    app.kubernetes.io/component: mlops
+    app.kubernetes.io/part-of: iip-platform
+data:
+  feast-affinity.yaml: |
+    # Feast Feature Store Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/mlops
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b"]
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["feast"]
+            topologyKey: kubernetes.io/hostname
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["redis", "postgresql"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "mlops-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  
+  mlflow-affinity.yaml: |
+    # MLflow Model Registry Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/mlops
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b"]
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["mlflow"]
+            topologyKey: kubernetes.io/hostname
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["postgresql", "minio"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "mlops-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# Frontend Service Anti-Affinity
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-affinity-config
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: frontend-affinity
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: iip-platform
+data:
+  frontend-affinity.yaml: |
+    # Frontend Service Pod Affinity Rules
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: node-role.kubernetes.io/frontend
+              operator: In
+              values: ["true"]
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: topology.kubernetes.io/zone
+              operator: In
+              values: ["us-west-2a", "us-west-2b", "us-west-2c"]
+        - weight: 50
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values: ["t3.medium", "t3.large"]
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values: ["frontend"]
+          topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["frontend"]
+            topologyKey: topology.kubernetes.io/zone
+    tolerations:
+    - key: "frontend-workload"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+---
+# Node Taints and Tolerations Reference
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-taints-reference
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: node-taints-reference
+    app.kubernetes.io/component: infrastructure
+    app.kubernetes.io/part-of: iip-platform
+data:
+  taints-guide.yaml: |
+    # Node Taints for Workload Isolation
+    # Apply these taints to nodes to ensure proper workload distribution
+    
+    # Database nodes
+    # kubectl taint nodes <node-name> database-workload=true:NoSchedule
+    # kubectl taint nodes <node-name> high-memory=true:NoSchedule
+    
+    # Cache nodes
+    # kubectl taint nodes <node-name> cache-workload=true:NoSchedule
+    # kubectl taint nodes <node-name> high-memory=true:NoSchedule
+    
+    # Storage nodes
+    # kubectl taint nodes <node-name> storage-workload=true:NoSchedule
+    # kubectl taint nodes <node-name> high-io=true:NoSchedule
+    
+    # GPU nodes for ML inference
+    # kubectl taint nodes <node-name> gpu-workload=true:NoSchedule
+    # kubectl taint nodes <node-name> nvidia.com/gpu=true:NoSchedule
+    # kubectl taint nodes <node-name> ml-inference=true:NoSchedule
+    
+    # Application nodes
+    # kubectl taint nodes <node-name> application-workload=true:NoSchedule
+    # kubectl taint nodes <node-name> real-time=true:NoSchedule
+    
+    # MLOps nodes
+    # kubectl taint nodes <node-name> mlops-workload=true:NoSchedule
+    
+    # Frontend nodes
+    # kubectl taint nodes <node-name> frontend-workload=true:NoSchedule
+  
+  labels-guide.yaml: |
+    # Node Labels for Workload Scheduling
+    # Apply these labels to nodes for proper scheduling
+    
+    # Database nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/database=true
+    
+    # Cache nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/cache=true
+    
+    # Storage nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/storage=true
+    
+    # ML inference nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/ml-inference=true
+    # kubectl label nodes <node-name> accelerator=nvidia-tesla-t4
+    
+    # Application nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/application=true
+    
+    # MLOps nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/mlops=true
+    
+    # Frontend nodes
+    # kubectl label nodes <node-name> node-role.kubernetes.io/frontend=true
+    
+    # Zone labels (usually auto-applied by cloud providers)
+    # kubectl label nodes <node-name> topology.kubernetes.io/zone=us-west-2a

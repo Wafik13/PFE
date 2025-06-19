@@ -1,0 +1,387 @@
+# Namespace for IIP Platform
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: iip-platform
+  labels:
+    name: iip-platform
+    security.istio.io/tlsMode: istio
+
+---
+# Service Account for IoT Gateway
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iot-gateway
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: iot-gateway
+automountServiceAccountToken: true
+
+---
+# Service Account for ML Service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ml-service
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: ml-service
+automountServiceAccountToken: true
+
+---
+# Service Account for Frontend
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: frontend
+automountServiceAccountToken: false
+
+---
+# Service Account for Backend
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: backend
+automountServiceAccountToken: true
+
+---
+# Service Account for Monitoring
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: monitoring
+automountServiceAccountToken: true
+
+---
+# Role for IoT Gateway - Limited permissions for MQTT and sensor data
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: iot-gateway-role
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: iot-gateway
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["mqtt-config", "sensor-config"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+  resourceNames: ["mqtt-credentials", "sensor-certificates"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+# Role for ML Service - Access to models and inference
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ml-service-role
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: ml-service
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update"]
+  resourceNames: ["ml-models", "feature-store", "mlflow-config"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get"]
+  resourceNames: ["mlflow-credentials", "model-registry-secret"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "create", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "create", "update", "delete"]
+- apiGroups: ["argoproj.io"]
+  resources: ["workflows", "workflowtemplates"]
+  verbs: ["get", "list", "create", "update", "delete"]
+
+---
+# Role for Frontend - Minimal permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: frontend-role
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: frontend
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get"]
+  resourceNames: ["frontend-config"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get"]
+  resourceNames: ["frontend"]
+
+---
+# Role for Backend - Full application permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: backend-role
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: backend
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["database-credentials", "jwt-secret", "mqtt-credentials"]
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list"]
+
+---
+# Role for Monitoring - Read access to metrics and logs
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: monitoring-role
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: monitoring
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "prometheusrules"]
+  verbs: ["get", "list", "watch", "create", "update"]
+
+---
+# Cluster Role for Operator User - Cross-namespace read access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: operator-user-role
+  labels:
+    app: iip-platform
+    component: rbac
+rules:
+- apiGroups: [""]
+  resources: ["namespaces", "nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "prometheusrules"]
+  verbs: ["get", "list", "watch"]
+
+---
+# Cluster Role for Admin - Full platform management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: admin-role
+  labels:
+    app: iip-platform
+    component: rbac
+rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+# RoleBinding for IoT Gateway
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: iot-gateway-binding
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: iot-gateway
+subjects:
+- kind: ServiceAccount
+  name: iot-gateway
+  namespace: iip-platform
+roleRef:
+  kind: Role
+  name: iot-gateway-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for ML Service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ml-service-binding
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: ml-service
+subjects:
+- kind: ServiceAccount
+  name: ml-service
+  namespace: iip-platform
+roleRef:
+  kind: Role
+  name: ml-service-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Frontend
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-binding
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: frontend
+subjects:
+- kind: ServiceAccount
+  name: frontend
+  namespace: iip-platform
+roleRef:
+  kind: Role
+  name: frontend-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Backend
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backend-binding
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: backend
+subjects:
+- kind: ServiceAccount
+  name: backend
+  namespace: iip-platform
+roleRef:
+  kind: Role
+  name: backend-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for Monitoring
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitoring-binding
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: monitoring
+subjects:
+- kind: ServiceAccount
+  name: monitoring
+  namespace: iip-platform
+roleRef:
+  kind: Role
+  name: monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRoleBinding for Operator User
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: operator-user-binding
+  labels:
+    app: iip-platform
+    component: rbac
+subjects:
+- kind: User
+  name: operator@example.com
+  apiGroup: rbac.authorization.k8s.io
+- kind: Group
+  name: iip-operators
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: operator-user-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRoleBinding for Admin
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin-binding
+  labels:
+    app: iip-platform
+    component: rbac
+subjects:
+- kind: User
+  name: admin@example.com
+  apiGroup: rbac.authorization.k8s.io
+- kind: Group
+  name: iip-admins
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin-role
+  apiGroup: rbac.authorization.k8s.io

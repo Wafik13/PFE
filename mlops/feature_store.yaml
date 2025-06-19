@@ -1,0 +1,267 @@
+# Feature Store Configuration for IIP Platform
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-store-config
+  namespace: mlops
+data:
+  feature_store.yaml: |
+    project: iip_platform
+    registry: s3://feature-store/registry.db
+    provider: local
+    online_store:
+      type: redis
+      connection_string: redis://redis-feature-store:6379
+    offline_store:
+      type: file
+      path: /data/offline_store
+    
+    entities:
+      - name: machine
+        value_type: STRING
+        description: "Industrial machine identifier"
+      
+      - name: sensor
+        value_type: STRING
+        description: "Sensor identifier"
+    
+    feature_views:
+      - name: machine_sensors
+        entities:
+          - machine
+        ttl: 3600  # 1 hour
+        features:
+          - name: temperature
+            dtype: float32
+          - name: pressure
+            dtype: float32
+          - name: vibration
+            dtype: float32
+          - name: rotation_speed
+            dtype: float32
+          - name: power_consumption
+            dtype: float32
+        online: true
+        source:
+          type: kafka
+          bootstrap_servers: kafka:9092
+          topic: sensor_data
+          message_format:
+            format: json
+      
+      - name: machine_aggregates
+        entities:
+          - machine
+        ttl: 86400  # 24 hours
+        features:
+          - name: avg_temperature_1h
+            dtype: float32
+          - name: max_pressure_1h
+            dtype: float32
+          - name: std_vibration_1h
+            dtype: float32
+          - name: total_power_1h
+            dtype: float32
+          - name: operating_hours
+            dtype: float32
+        online: true
+        source:
+          type: bigquery
+          table: iip_platform.machine_hourly_aggregates
+      
+      - name: fault_history
+        entities:
+          - machine
+        ttl: 2592000  # 30 days
+        features:
+          - name: last_fault_type
+            dtype: string
+          - name: days_since_last_fault
+            dtype: int32
+          - name: fault_frequency_30d
+            dtype: int32
+          - name: mtbf_hours
+            dtype: float32
+        online: true
+        source:
+          type: postgresql
+          connection_string: postgresql://feast:password@postgres:5432/feast
+          table: fault_history
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-feature-store
+  namespace: mlops
+  labels:
+    app: redis-feature-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-feature-store
+  template:
+    metadata:
+      labels:
+        app: redis-feature-store
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --maxmemory
+        - "512mb"
+        - --maxmemory-policy
+        - "allkeys-lru"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: redis-data
+        persistentVolumeClaim:
+          claimName: redis-feature-store-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-feature-store
+  namespace: mlops
+  labels:
+    app: redis-feature-store
+spec:
+  selector:
+    app: redis-feature-store
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-feature-store-pvc
+  namespace: mlops
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: feature-materialization
+  namespace: mlops
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: feast-materialize
+            image: feastdev/feature-server:latest
+            command:
+            - feast
+            - materialize-incremental
+            - $(date -d '6 hours ago' --iso-8601)
+            env:
+            - name: FEAST_USAGE
+              value: "false"
+            volumeMounts:
+            - name: feature-store-config
+              mountPath: /feature_repo
+          volumes:
+          - name: feature-store-config
+            configMap:
+              name: feature-store-config
+          restartPolicy: OnFailure
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-server
+  namespace: mlops
+  labels:
+    app: feature-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: feature-server
+  template:
+    metadata:
+      labels:
+        app: feature-server
+    spec:
+      containers:
+      - name: feature-server
+        image: feastdev/feature-server:latest
+        ports:
+        - containerPort: 6566
+        env:
+        - name: FEAST_USAGE
+          value: "false"
+        volumeMounts:
+        - name: feature-store-config
+          mountPath: /feature_repo
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 6566
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 6566
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: feature-store-config
+        configMap:
+          name: feature-store-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-server
+  namespace: mlops
+  labels:
+    app: feature-server
+spec:
+  selector:
+    app: feature-server
+  ports:
+  - port: 6566
+    targetPort: 6566
+    protocol: TCP
+  type: ClusterIP

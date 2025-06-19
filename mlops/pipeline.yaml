@@ -1,0 +1,163 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ml-training-pipeline
+  namespace: mlops
+spec:
+  entrypoint: ml-pipeline
+  serviceAccountName: argo-workflow
+  templates:
+  - name: ml-pipeline
+    dag:
+      tasks:
+      - name: data-ingestion
+        template: data-ingestion
+      - name: feature-engineering
+        template: feature-engineering
+        dependencies: [data-ingestion]
+      - name: train-fault-classifier
+        template: train-model
+        dependencies: [feature-engineering]
+        arguments:
+          parameters:
+          - name: model-type
+            value: "RandomForestFaultClassifier"
+      - name: train-lstm-forecaster
+        template: train-model
+        dependencies: [feature-engineering]
+        arguments:
+          parameters:
+          - name: model-type
+            value: "LSTMValueForecaster"
+      - name: train-anomaly-detector
+        template: train-model
+        dependencies: [feature-engineering]
+        arguments:
+          parameters:
+          - name: model-type
+            value: "IsolationForestAnomalyDetector"
+      - name: model-validation
+        template: validate-models
+        dependencies: [train-fault-classifier, train-lstm-forecaster, train-anomaly-detector]
+      - name: model-promotion
+        template: promote-model
+        dependencies: [model-validation]
+        when: "{{tasks.model-validation.outputs.parameters.validation-passed}} == true"
+
+  - name: data-ingestion
+    container:
+      image: mlops/data-ingestion:latest
+      command: [python]
+      args: ["/app/data_ingestion.py"]
+      env:
+      - name: MQTT_BROKER
+        valueFrom:
+          secretKeyRef:
+            name: mqtt-credentials
+            key: broker-url
+      - name: MLFLOW_TRACKING_URI
+        valueFrom:
+          configMapKeyRef:
+            name: mlflow-config
+            key: tracking-uri
+      volumeMounts:
+      - name: data-volume
+        mountPath: /data
+
+  - name: feature-engineering
+    container:
+      image: mlops/feature-engineering:latest
+      command: [python]
+      args: ["/app/feature_engineering.py"]
+      env:
+      - name: MLFLOW_TRACKING_URI
+        valueFrom:
+          configMapKeyRef:
+            name: mlflow-config
+            key: tracking-uri
+      volumeMounts:
+      - name: data-volume
+        mountPath: /data
+
+  - name: train-model
+    inputs:
+      parameters:
+      - name: model-type
+    container:
+      image: mlops/model-training:latest
+      command: [python]
+      args: ["/app/train_model.py", "--model-type", "{{inputs.parameters.model-type}}"]
+      env:
+      - name: MLFLOW_TRACKING_URI
+        valueFrom:
+          configMapKeyRef:
+            name: mlflow-config
+            key: tracking-uri
+      - name: MLFLOW_EXPERIMENT_NAME
+        value: "iip-ml-models"
+      volumeMounts:
+      - name: data-volume
+        mountPath: /data
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+
+  - name: validate-models
+    container:
+      image: mlops/model-validation:latest
+      command: [python]
+      args: ["/app/validate_models.py"]
+      env:
+      - name: MLFLOW_TRACKING_URI
+        valueFrom:
+          configMapKeyRef:
+            name: mlflow-config
+            key: tracking-uri
+      volumeMounts:
+      - name: data-volume
+        mountPath: /data
+    outputs:
+      parameters:
+      - name: validation-passed
+        valueFrom:
+          path: /tmp/validation_result.txt
+
+  - name: promote-model
+    container:
+      image: mlops/model-promotion:latest
+      command: [python]
+      args: ["/app/promote_model.py"]
+      env:
+      - name: MLFLOW_TRACKING_URI
+        valueFrom:
+          configMapKeyRef:
+            name: mlflow-config
+            key: tracking-uri
+      - name: MODEL_REGISTRY_STAGE
+        value: "Production"
+
+  volumes:
+  - name: data-volume
+    persistentVolumeClaim:
+      claimName: ml-data-pvc
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: ml-training-schedule
+  namespace: mlops
+spec:
+  schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+  workflowSpec:
+    entrypoint: ml-pipeline
+    serviceAccountName: argo-workflow
+    templates:
+    - name: ml-pipeline
+      templateRef:
+        name: ml-training-pipeline
+        template: ml-pipeline

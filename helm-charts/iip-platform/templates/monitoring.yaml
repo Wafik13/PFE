@@ -1,0 +1,481 @@
+{{- if .Values.monitoring.prometheus.enabled }}
+# Prometheus ServiceMonitor for SCADA Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: scada-service-monitor
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: scada-service-monitor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: iip-platform
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scada-service
+  namespaceSelector:
+    matchNames:
+    - iip-applications
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+
+---
+# Prometheus ServiceMonitor for ML Inference Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ml-inference-service-monitor
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: ml-inference-service-monitor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ml-inference-service
+  namespaceSelector:
+    matchNames:
+    - iip-applications
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+    scheme: http
+
+---
+# Prometheus ServiceMonitor for Kong Gateway
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kong-gateway-monitor
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: kong-gateway-monitor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+  namespaceSelector:
+    matchNames:
+    - iip-infrastructure
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+
+---
+# Prometheus ServiceMonitor for Infrastructure Components
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: infrastructure-monitor
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: infrastructure-monitor
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: database
+  namespaceSelector:
+    matchNames:
+    - iip-infrastructure
+  endpoints:
+  - port: metrics
+    interval: 60s
+    path: /metrics
+    scheme: http
+
+---
+# PrometheusRule for IIP Platform Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: iip-platform-alerts
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: iip-platform-alerts
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+  - name: iip-platform.rules
+    rules:
+    # SCADA Service Alerts
+    - alert: SCADAServiceDown
+      expr: up{job="scada-service"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: scada
+      annotations:
+        summary: "SCADA service is down"
+        description: "SCADA service has been down for more than 1 minute"
+    
+    - alert: SCADAHighLatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="scada-service"}[5m])) > 0.5
+      for: 5m
+      labels:
+        severity: warning
+        service: scada
+      annotations:
+        summary: "High latency in SCADA service"
+        description: "95th percentile latency is {{ $value }}s"
+    
+    - alert: SCADAHighErrorRate
+      expr: rate(http_requests_total{job="scada-service",status=~"5.."}[5m]) / rate(http_requests_total{job="scada-service"}[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+        service: scada
+      annotations:
+        summary: "High error rate in SCADA service"
+        description: "Error rate is {{ $value | humanizePercentage }}"
+    
+    # ML Inference Service Alerts
+    - alert: MLInferenceServiceDown
+      expr: up{job="ml-inference-service"} == 0
+      for: 2m
+      labels:
+        severity: critical
+        service: ml-inference
+      annotations:
+        summary: "ML Inference service is down"
+        description: "ML Inference service has been down for more than 2 minutes"
+    
+    - alert: MLInferenceHighLatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="ml-inference-service"}[5m])) > 2.0
+      for: 5m
+      labels:
+        severity: warning
+        service: ml-inference
+      annotations:
+        summary: "High latency in ML Inference service"
+        description: "95th percentile latency is {{ $value }}s"
+    
+    - alert: GPUUtilizationHigh
+      expr: nvidia_gpu_utilization > 90
+      for: 10m
+      labels:
+        severity: warning
+        service: ml-inference
+      annotations:
+        summary: "High GPU utilization"
+        description: "GPU utilization is {{ $value }}% on {{ $labels.instance }}"
+    
+    # Infrastructure Alerts
+    - alert: PostgreSQLDown
+      expr: up{job="postgresql"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: postgresql
+      annotations:
+        summary: "PostgreSQL is down"
+        description: "PostgreSQL database has been down for more than 1 minute"
+    
+    - alert: RedisDown
+      expr: up{job="redis"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: redis
+      annotations:
+        summary: "Redis is down"
+        description: "Redis cache has been down for more than 1 minute"
+    
+    - alert: InfluxDBDown
+      expr: up{job="influxdb"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: influxdb
+      annotations:
+        summary: "InfluxDB is down"
+        description: "InfluxDB time-series database has been down for more than 1 minute"
+    
+    - alert: MinIODown
+      expr: up{job="minio"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: minio
+      annotations:
+        summary: "MinIO is down"
+        description: "MinIO object storage has been down for more than 1 minute"
+    
+    - alert: RabbitMQDown
+      expr: up{job="rabbitmq"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: rabbitmq
+      annotations:
+        summary: "RabbitMQ is down"
+        description: "RabbitMQ message broker has been down for more than 1 minute"
+    
+    # Resource Alerts
+    - alert: HighMemoryUsage
+      expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage"
+        description: "Memory usage is above 85% on {{ $labels.instance }}"
+    
+    - alert: HighCPUUsage
+      expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage"
+        description: "CPU usage is above 80% on {{ $labels.instance }}"
+    
+    - alert: DiskSpaceLow
+      expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 10
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Low disk space"
+        description: "Disk space is below 10% on {{ $labels.instance }}"
+    
+    # Kong Gateway Alerts
+    - alert: KongGatewayDown
+      expr: up{job="kong-gateway"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: kong
+      annotations:
+        summary: "Kong API Gateway is down"
+        description: "Kong API Gateway has been down for more than 1 minute"
+    
+    - alert: KongHighLatency
+      expr: histogram_quantile(0.95, rate(kong_latency_bucket[5m])) > 1000
+      for: 5m
+      labels:
+        severity: warning
+        service: kong
+      annotations:
+        summary: "High latency in Kong Gateway"
+        description: "95th percentile latency is {{ $value }}ms"
+    
+    # MLOps Alerts
+    - alert: MLFlowDown
+      expr: up{job="mlflow-server"} == 0
+      for: 2m
+      labels:
+        severity: warning
+        service: mlflow
+      annotations:
+        summary: "MLflow server is down"
+        description: "MLflow model registry has been down for more than 2 minutes"
+    
+    - alert: ArgoWorkflowsDown
+      expr: up{job="workflow-controller"} == 0
+      for: 2m
+      labels:
+        severity: warning
+        service: argo-workflows
+      annotations:
+        summary: "Argo Workflows controller is down"
+        description: "Argo Workflows controller has been down for more than 2 minutes"
+{{- end }}
+
+{{- if .Values.monitoring.grafana.enabled }}
+---
+# Grafana Dashboard ConfigMap for IIP Platform
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iip-platform-dashboard
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: grafana-dashboard
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+    grafana_dashboard: "1"
+data:
+  iip-platform-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "IIP Platform Overview",
+        "tags": ["iip", "industrial", "iot"],
+        "style": "dark",
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Service Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=~\"scada-service|ml-inference-service|kong-gateway\"}",
+                "legendFormat": "{{job}}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "mappings": [
+                  {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+                  {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+                ]
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total[5m])",
+                "legendFormat": "{{job}} - {{method}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Response Time (95th percentile)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+                "legendFormat": "{{job}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Error Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m])",
+                "legendFormat": "{{job}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          },
+          {
+            "id": 5,
+            "title": "Resource Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(container_cpu_usage_seconds_total{namespace=~\"iip-.*\"}[5m])",
+                "legendFormat": "CPU - {{pod}}"
+              },
+              {
+                "expr": "container_memory_usage_bytes{namespace=~\"iip-.*\"} / 1024 / 1024",
+                "legendFormat": "Memory (MB) - {{pod}}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+---
+# Grafana Dashboard ConfigMap for SCADA Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scada-monitoring-dashboard
+  namespace: iip-monitoring
+  labels:
+    app.kubernetes.io/name: grafana-dashboard
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+    grafana_dashboard: "1"
+data:
+  scada-monitoring.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "SCADA System Monitoring",
+        "tags": ["scada", "industrial", "control"],
+        "style": "dark",
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "SCADA Service Health",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=\"scada-service\"}",
+                "legendFormat": "Service Status"
+              }
+            ],
+            "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Active Connections",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "scada_active_connections",
+                "legendFormat": "Connections"
+              }
+            ],
+            "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Control Commands/sec",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(scada_control_commands_total[5m])",
+                "legendFormat": "Commands"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}
+          },
+          {
+            "id": 4,
+            "title": "Data Points Processed",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(scada_data_points_total[5m])",
+                "legendFormat": "Data Points/sec"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "10s"
+      }
+    }
+{{- end }}

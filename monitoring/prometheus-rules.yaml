@@ -1,0 +1,245 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: iip-platform-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: critical-alarms
+    interval: 30s
+    rules:
+    - alert: CriticalMachineAlarm
+      expr: increase(machine_alarms_total{severity="critical"}[5m]) > 0
+      for: 0m
+      labels:
+        severity: critical
+        component: machine
+      annotations:
+        summary: "Critical alarm detected on machine {{ $labels.machine_id }}"
+        description: "Machine {{ $labels.machine_id }} has triggered a critical alarm. Alarm type: {{ $labels.alarm_type }}"
+        runbook_url: "https://docs.iip-platform.com/runbooks/critical-alarms"
+    
+    - alert: HighTemperatureAlarm
+      expr: machine_temperature > 80
+      for: 2m
+      labels:
+        severity: warning
+        component: machine
+      annotations:
+        summary: "High temperature detected on machine {{ $labels.machine_id }}"
+        description: "Machine {{ $labels.machine_id }} temperature is {{ $value }}°C, exceeding the threshold of 80°C"
+    
+    - alert: AbnormalVibration
+      expr: machine_vibration > 50
+      for: 1m
+      labels:
+        severity: critical
+        component: machine
+      annotations:
+        summary: "Abnormal vibration detected on machine {{ $labels.machine_id }}"
+        description: "Machine {{ $labels.machine_id }} vibration level is {{ $value }}, indicating potential mechanical issues"
+
+  - name: ml-inference-alerts
+    interval: 30s
+    rules:
+    - alert: MLInferenceServiceDown
+      expr: up{job="ml-inference-service"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: ml-inference
+      annotations:
+        summary: "ML Inference Service is down"
+        description: "The ML inference service has been down for more than 1 minute"
+        runbook_url: "https://docs.iip-platform.com/runbooks/ml-service-down"
+    
+    - alert: MLInferenceHighLatency
+      expr: histogram_quantile(0.95, rate(ml_prediction_duration_seconds_bucket[5m])) > 2
+      for: 2m
+      labels:
+        severity: warning
+        component: ml-inference
+      annotations:
+        summary: "High ML inference latency"
+        description: "95th percentile ML inference latency is {{ $value }}s, exceeding 2s threshold"
+    
+    - alert: MLInferenceErrorRate
+      expr: rate(ml_predictions_total{status="error"}[5m]) / rate(ml_predictions_total[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+        component: ml-inference
+      annotations:
+        summary: "High ML inference error rate"
+        description: "ML inference error rate is {{ $value | humanizePercentage }}, exceeding 10% threshold"
+    
+    - alert: MLModelLoadFailure
+      expr: increase(ml_model_loads_total{status="error"}[10m]) > 0
+      for: 0m
+      labels:
+        severity: critical
+        component: ml-inference
+      annotations:
+        summary: "ML model loading failed"
+        description: "Failed to load ML model {{ $labels.model_type }}"
+
+  - name: websocket-alerts
+    interval: 15s
+    rules:
+    - alert: WebSocketServiceDown
+      expr: up{job="websocket-service"} == 0
+      for: 30s
+      labels:
+        severity: critical
+        component: websocket
+      annotations:
+        summary: "WebSocket service is down"
+        description: "WebSocket service has been unreachable for more than 30 seconds"
+        runbook_url: "https://docs.iip-platform.com/runbooks/websocket-down"
+    
+    - alert: WebSocketConnectionDrop
+      expr: rate(websocket_connections_total{status="disconnected"}[5m]) > rate(websocket_connections_total{status="connected"}[5m]) * 0.5
+      for: 1m
+      labels:
+        severity: warning
+        component: websocket
+      annotations:
+        summary: "High WebSocket disconnection rate"
+        description: "WebSocket disconnection rate is high, indicating potential connectivity issues"
+    
+    - alert: WebSocketMessageBacklog
+      expr: websocket_message_queue_size > 1000
+      for: 2m
+      labels:
+        severity: warning
+        component: websocket
+      annotations:
+        summary: "WebSocket message backlog"
+        description: "WebSocket message queue size is {{ $value }}, indicating processing delays"
+
+  - name: backend-alerts
+    interval: 30s
+    rules:
+    - alert: BackendServiceDown
+      expr: up{job="backend-service"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: backend
+      annotations:
+        summary: "Backend service is down"
+        description: "Backend service has been down for more than 1 minute"
+        runbook_url: "https://docs.iip-platform.com/runbooks/backend-down"
+    
+    - alert: HighBackendLatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="backend-service"}[5m])) > 1
+      for: 2m
+      labels:
+        severity: warning
+        component: backend
+      annotations:
+        summary: "High backend API latency"
+        description: "95th percentile backend latency is {{ $value }}s, exceeding 1s threshold"
+    
+    - alert: BackendErrorRate
+      expr: rate(http_requests_total{job="backend-service",code=~"5.."}[5m]) / rate(http_requests_total{job="backend-service"}[5m]) > 0.05
+      for: 2m
+      labels:
+        severity: warning
+        component: backend
+      annotations:
+        summary: "High backend error rate"
+        description: "Backend 5xx error rate is {{ $value | humanizePercentage }}, exceeding 5% threshold"
+
+  - name: mqtt-alerts
+    interval: 30s
+    rules:
+    - alert: MQTTGatewayDown
+      expr: up{job="mqtt-gateway"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: mqtt
+      annotations:
+        summary: "MQTT Gateway is down"
+        description: "MQTT Gateway has been down for more than 1 minute"
+        runbook_url: "https://docs.iip-platform.com/runbooks/mqtt-down"
+    
+    - alert: MQTTMessageBacklog
+      expr: mqtt_message_queue_size > 5000
+      for: 2m
+      labels:
+        severity: warning
+        component: mqtt
+      annotations:
+        summary: "MQTT message backlog"
+        description: "MQTT message queue size is {{ $value }}, indicating processing delays"
+    
+    - alert: MQTTConnectionLoss
+      expr: mqtt_connected_clients < mqtt_expected_clients * 0.8
+      for: 5m
+      labels:
+        severity: warning
+        component: mqtt
+      annotations:
+        summary: "MQTT client connection loss"
+        description: "Only {{ $value }} out of {{ $labels.mqtt_expected_clients }} expected MQTT clients are connected"
+
+  - name: infrastructure-alerts
+    interval: 60s
+    rules:
+    - alert: HighCPUUsage
+      expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "High CPU usage on {{ $labels.instance }}"
+        description: "CPU usage is {{ $value }}% on instance {{ $labels.instance }}"
+    
+    - alert: HighMemoryUsage
+      expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+      for: 5m
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "High memory usage on {{ $labels.instance }}"
+        description: "Memory usage is {{ $value }}% on instance {{ $labels.instance }}"
+    
+    - alert: DiskSpaceLow
+      expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+      for: 5m
+      labels:
+        severity: critical
+        component: infrastructure
+      annotations:
+        summary: "Low disk space on {{ $labels.instance }}"
+        description: "Disk usage is {{ $value }}% on {{ $labels.device }} of instance {{ $labels.instance }}"
+
+  - name: mlflow-alerts
+    interval: 60s
+    rules:
+    - alert: MLflowServerDown
+      expr: up{job="mlflow-server"} == 0
+      for: 2m
+      labels:
+        severity: warning
+        component: mlflow
+      annotations:
+        summary: "MLflow server is down"
+        description: "MLflow tracking server has been down for more than 2 minutes"
+    
+    - alert: MLflowDatabaseConnectionFailed
+      expr: mlflow_database_connections_failed_total > 0
+      for: 1m
+      labels:
+        severity: critical
+        component: mlflow
+      annotations:
+        summary: "MLflow database connection failed"
+        description: "MLflow server cannot connect to the database"

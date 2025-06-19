@@ -1,0 +1,450 @@
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# Default deny all egress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+
+---
+# Allow Frontend to Backend communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-to-backend
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system  # Allow Istio ingress
+    ports:
+    - protocol: TCP
+      port: 8000
+    - protocol: TCP
+      port: 8080  # WebSocket
+
+---
+# Allow Backend to MQTT communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-mqtt
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: mqtt-gateway
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    ports:
+    - protocol: TCP
+      port: 1883
+    - protocol: TCP
+      port: 8883  # MQTT over TLS
+    - protocol: TCP
+      port: 9001  # MQTT over WebSocket
+
+---
+# Allow Backend to MLflow communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-mlflow
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: mlflow
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    - podSelector:
+        matchLabels:
+          app: ml-inference
+    ports:
+    - protocol: TCP
+      port: 5000
+
+---
+# Allow Backend to Database communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-database
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    - podSelector:
+        matchLabels:
+          app: mlflow
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+# Allow Backend to Redis communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-to-redis
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    - podSelector:
+        matchLabels:
+          app: ml-inference
+    - podSelector:
+        matchLabels:
+          app: feature-store
+    ports:
+    - protocol: TCP
+      port: 6379
+
+---
+# Allow ML Inference service communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ml-inference-access
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: ml-inference
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system  # Allow Istio ingress
+    ports:
+    - protocol: TCP
+      port: 8001
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mlflow
+    ports:
+    - protocol: TCP
+      port: 5000
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  - to:
+    - podSelector:
+        matchLabels:
+          app: feature-store
+    ports:
+    - protocol: TCP
+      port: 6566
+
+---
+# Allow Monitoring access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-access
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: grafana
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 9090
+  egress:
+  - to: []  # Allow scraping all pods
+    ports:
+    - protocol: TCP
+      port: 8000  # Backend metrics
+    - protocol: TCP
+      port: 8001  # ML inference metrics
+    - protocol: TCP
+      port: 1883  # MQTT metrics
+    - protocol: TCP
+      port: 5000  # MLflow metrics
+    - protocol: TCP
+      port: 6379  # Redis metrics
+    - protocol: TCP
+      port: 5432  # PostgreSQL metrics
+
+---
+# Allow Grafana access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: grafana-access
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: grafana
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9090
+
+---
+# Allow DNS resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+# Allow external HTTPS/HTTP for updates and external APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-https
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      external-access: "true"
+  policyTypes:
+  - Egress
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+
+---
+# Allow Istio sidecar communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-istio-sidecar
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 15090  # Envoy admin
+    - protocol: TCP
+      port: 15001  # Envoy outbound
+    - protocol: TCP
+      port: 15006  # Envoy inbound
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 15090
+    - protocol: TCP
+      port: 15001
+    - protocol: TCP
+      port: 15006
+
+---
+# Allow MQTT external device connections
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mqtt-external-devices
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: mqtt-gateway
+  policyTypes:
+  - Ingress
+  ingress:
+  - from: []  # Allow from any external source
+    ports:
+    - protocol: TCP
+      port: 1883  # MQTT
+    - protocol: TCP
+      port: 8883  # MQTT over TLS
+    - protocol: TCP
+      port: 9001  # MQTT over WebSocket
+
+---
+# Restrict admin access to specific IPs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: admin-ip-restriction
+  namespace: iip-platform
+  labels:
+    app: iip-platform
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      access-level: admin
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 10.0.0.0/8  # Internal network only
+    - ipBlock:
+        cidr: 192.168.1.0/24  # Admin network
+    ports:
+    - protocol: TCP
+      port: 9090  # Prometheus
+    - protocol: TCP
+      port: 5000  # MLflow

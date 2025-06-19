@@ -1,0 +1,513 @@
+# ArgoCD Applications for Industrial Intelligence Platform
+# This file defines ArgoCD applications for different environments
+
+---
+# Development Environment Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-platform-dev
+  namespace: argocd
+  labels:
+    environment: development
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: develop
+    path: helm-charts/iip-platform
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+      parameters:
+        - name: global.environment
+          value: development
+        - name: global.domain
+          value: dev.iip.company.com
+        - name: scada.replicaCount
+          value: "1"
+        - name: analytics.replicaCount
+          value: "1"
+        - name: mlInference.replicaCount
+          value: "1"
+        - name: postgresql.primary.persistence.size
+          value: 10Gi
+        - name: influxdb.persistence.size
+          value: 10Gi
+        - name: minio.persistence.size
+          value: 20Gi
+  destination:
+    server: https://dev-k8s.company.com
+    namespace: iip-applications
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+
+---
+# Staging Environment Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-platform-staging
+  namespace: argocd
+  labels:
+    environment: staging
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: main
+    path: helm-charts/iip-platform
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-staging.yaml
+      parameters:
+        - name: global.environment
+          value: staging
+        - name: global.domain
+          value: staging.iip.company.com
+        - name: scada.replicaCount
+          value: "2"
+        - name: analytics.replicaCount
+          value: "2"
+        - name: mlInference.replicaCount
+          value: "2"
+        - name: postgresql.primary.persistence.size
+          value: 50Gi
+        - name: influxdb.persistence.size
+          value: 100Gi
+        - name: minio.persistence.size
+          value: 200Gi
+  destination:
+    server: https://staging-k8s.company.com
+    namespace: iip-applications
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+
+---
+# Production Environment Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-platform-prod
+  namespace: argocd
+  labels:
+    environment: production
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.teams: iip-platform
+    notifications.argoproj.io/subscribe.on-sync-failed.teams: iip-platform
+    notifications.argoproj.io/subscribe.on-health-degraded.teams: iip-platform
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: HEAD
+    path: helm-charts/iip-platform
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+      parameters:
+        - name: global.environment
+          value: production
+        - name: global.domain
+          value: iip.company.com
+        - name: scada.replicaCount
+          value: "3"
+        - name: analytics.replicaCount
+          value: "3"
+        - name: mlInference.replicaCount
+          value: "3"
+        - name: postgresql.primary.persistence.size
+          value: 200Gi
+        - name: influxdb.persistence.size
+          value: 500Gi
+        - name: minio.persistence.size
+          value: 1Ti
+  destination:
+    server: https://prod-k8s.company.com
+    namespace: iip-applications
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  revisionHistoryLimit: 20
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+
+---
+# Infrastructure Application (shared across environments)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-infrastructure
+  namespace: argocd
+  labels:
+    component: infrastructure
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: main
+    path: k8s-manifests/infrastructure
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iip-infrastructure
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+
+---
+# MLOps Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-mlops
+  namespace: argocd
+  labels:
+    component: mlops
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: main
+    path: k8s-manifests/mlops
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: iip-mlops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+
+---
+# Monitoring Application
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: iip-monitoring
+  namespace: argocd
+  labels:
+    component: monitoring
+    platform: iip
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: iip-platform
+  source:
+    repoURL: https://gitlab.company.com/iip/platform.git
+    targetRevision: main
+    path: k8s-manifests/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+
+---
+# ArgoCD Project for IIP Platform
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: iip-platform
+  namespace: argocd
+  labels:
+    platform: iip
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Industrial Intelligence Platform Project
+  sourceRepos:
+    - https://gitlab.company.com/iip/*
+    - https://charts.bitnami.com/bitnami
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://kubernetes.github.io/ingress-nginx
+    - https://istio-release.storage.googleapis.com/charts
+    - https://kong.github.io/charts
+  destinations:
+    - namespace: 'iip-*'
+      server: '*'
+    - namespace: 'monitoring'
+      server: '*'
+    - namespace: 'istio-system'
+      server: '*'
+    - namespace: 'kong'
+      server: '*'
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: ''
+      kind: PersistentVolume
+    - group: 'storage.k8s.io'
+      kind: StorageClass
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+    - group: 'apiextensions.k8s.io'
+      kind: CustomResourceDefinition
+    - group: 'admissionregistration.k8s.io'
+      kind: MutatingWebhookConfiguration
+    - group: 'admissionregistration.k8s.io'
+      kind: ValidatingWebhookConfiguration
+    - group: 'networking.istio.io'
+      kind: '*'
+    - group: 'security.istio.io'
+      kind: '*'
+    - group: 'install.istio.io'
+      kind: '*'
+    - group: 'serving.knative.dev'
+      kind: '*'
+    - group: 'serving.kserve.io'
+      kind: '*'
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: '*'
+    - group: 'apps'
+      kind: '*'
+    - group: 'extensions'
+      kind: '*'
+    - group: 'networking.k8s.io'
+      kind: '*'
+    - group: 'policy'
+      kind: '*'
+    - group: 'autoscaling'
+      kind: '*'
+    - group: 'batch'
+      kind: '*'
+    - group: 'monitoring.coreos.com'
+      kind: '*'
+    - group: 'argoproj.io'
+      kind: '*'
+  roles:
+    - name: iip-developers
+      description: Developers with read-only access
+      policies:
+        - p, proj:iip-platform:iip-developers, applications, get, iip-platform/*, allow
+        - p, proj:iip-platform:iip-developers, applications, sync, iip-platform/iip-platform-dev, allow
+      groups:
+        - iip-developers
+    - name: iip-operators
+      description: Operators with deployment access
+      policies:
+        - p, proj:iip-platform:iip-operators, applications, *, iip-platform/*, allow
+        - p, proj:iip-platform:iip-operators, repositories, *, *, allow
+      groups:
+        - iip-operators
+    - name: iip-admins
+      description: Administrators with full access
+      policies:
+        - p, proj:iip-platform:iip-admins, *, *, iip-platform/*, allow
+      groups:
+        - iip-admins
+  syncWindows:
+    - kind: allow
+      schedule: '0 9-17 * * MON-FRI'
+      duration: 8h
+      applications:
+        - iip-platform-dev
+        - iip-platform-staging
+      manualSync: true
+    - kind: deny
+      schedule: '0 18-8 * * *'
+      duration: 14h
+      applications:
+        - iip-platform-prod
+      manualSync: false
+    - kind: deny
+      schedule: '0 0-23 * * SAT,SUN'
+      duration: 24h
+      applications:
+        - iip-platform-prod
+      manualSync: false
+
+---
+# ArgoCD Notification Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-notifications
+    app.kubernetes.io/part-of: argocd
+data:
+  service.teams: |
+    recipientUrls:
+      iip-platform: $teams-webhook-url
+  template.app-deployed: |
+    teams:
+      title: Application {{.app.metadata.name}} is now running new version.
+      text: |
+        Application {{.app.metadata.name}} is now running new version of deployments manifests.
+        Environment: {{.app.metadata.labels.environment}}
+        Revision: {{.app.status.sync.revision}}
+  template.app-health-degraded: |
+    teams:
+      title: Application {{.app.metadata.name}} has degraded.
+      text: |
+        Application {{.app.metadata.name}} has degraded.
+        Environment: {{.app.metadata.labels.environment}}
+        Health Status: {{.app.status.health.status}}
+  template.app-sync-failed: |
+    teams:
+      title: Application {{.app.metadata.name}} sync is failed.
+      text: |
+        Application {{.app.metadata.name}} sync is failed.
+        Environment: {{.app.metadata.labels.environment}}
+        Sync Status: {{.app.status.sync.status}}
+        Message: {{.app.status.operationState.message}}
+  trigger.on-deployed: |
+    - description: Application is synced and healthy. Triggered once per commit.
+      oncePer: app.status.sync.revision
+      send:
+      - app-deployed
+      when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+  trigger.on-health-degraded: |
+    - description: Application has degraded
+      send:
+      - app-health-degraded
+      when: app.status.health.status == 'Degraded'
+  trigger.on-sync-failed: |
+    - description: Application syncing has failed
+      send:
+      - app-sync-failed
+      when: app.status.operationState.phase in ['Error', 'Failed']
+  subscriptions: |
+    - recipients:
+      - iip-platform
+      triggers:
+      - on-deployed
+      - on-health-degraded
+      - on-sync-failed
+
+---
+# ArgoCD Notification Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-notifications-secret
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-notifications
+    app.kubernetes.io/part-of: argocd
+type: Opaque
+stringData:
+  teams-webhook-url: "https://outlook.office.com/webhook/YOUR_TEAMS_WEBHOOK_URL"

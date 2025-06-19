@@ -1,0 +1,400 @@
+# Development Environment Values for IIP Platform
+# Override values for development deployment
+
+global:
+  environment: development
+  domain: dev.iip.company.com
+  imageRegistry: registry.gitlab.company.com/iip/platform
+  imagePullPolicy: Always
+  storageClass: standard
+  
+# Reduced resource requirements for development
+scada:
+  replicaCount: 1
+  image:
+    tag: develop
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+  env:
+    LOG_LEVEL: DEBUG
+    ENABLE_DEBUG_ENDPOINTS: "true"
+
+analytics:
+  replicaCount: 1
+  image:
+    tag: develop
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  autoscaling:
+    enabled: false
+  env:
+    LOG_LEVEL: DEBUG
+    BATCH_SIZE: 100
+
+mlInference:
+  replicaCount: 1
+  image:
+    tag: develop
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+      nvidia.com/gpu: 0  # No GPU in dev
+    limits:
+      cpu: 1
+      memory: 1Gi
+  autoscaling:
+    enabled: false
+  env:
+    LOG_LEVEL: DEBUG
+    MODEL_CACHE_SIZE: 1
+    USE_CPU_INFERENCE: "true"
+
+frontend:
+  replicaCount: 1
+  image:
+    tag: develop
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  env:
+    NODE_ENV: development
+    API_BASE_URL: https://dev.iip.company.com/api
+    WEBSOCKET_URL: wss://dev.iip.company.com/ws
+    ENABLE_DEBUG: "true"
+
+# Infrastructure components with reduced resources
+postgresql:
+  auth:
+    postgresPassword: dev-postgres-password
+    database: iip_dev
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: standard
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  readReplicas:
+    replicaCount: 0  # No read replicas in dev
+  metrics:
+    enabled: true
+
+redis:
+  auth:
+    enabled: true
+    password: dev-redis-password
+  master:
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClass: standard
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  replica:
+    replicaCount: 0  # No replicas in dev
+
+rabbitmq:
+  auth:
+    username: dev-rabbitmq-user
+    password: dev-rabbitmq-password
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  clustering:
+    enabled: false  # Single node in dev
+
+minio:
+  auth:
+    rootUser: dev-minio-user
+    rootPassword: dev-minio-password
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  mode: standalone  # Single node in dev
+  replicas: 1
+
+influxdb:
+  auth:
+    admin:
+      username: dev-influx-admin
+      password: dev-influx-password
+      token: dev-influx-token-12345
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: standard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# API Gateway configuration
+kong:
+  env:
+    database: "off"  # DB-less mode for dev
+    log_level: debug
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+
+# Service Mesh configuration
+istio:
+  pilot:
+    env:
+      PILOT_TRACE_SAMPLING: 100.0  # Full tracing in dev
+  proxy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+# MLOps components
+feast:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    LOG_LEVEL: DEBUG
+    FEAST_USAGE_ENABLED: "false"
+
+mlflow:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    MLFLOW_TRACKING_URI: http://mlflow.iip-mlops.svc.cluster.local:5000
+    MLFLOW_S3_ENDPOINT_URL: http://minio.iip-infrastructure.svc.cluster.local:9000
+
+argoWorkflows:
+  controller:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  server:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+kserve:
+  controller:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  webhook:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# Monitoring stack
+prometheus:
+  server:
+    retention: "7d"  # Shorter retention in dev
+    persistentVolume:
+      size: 20Gi
+      storageClass: standard
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  alertmanager:
+    enabled: false  # Disable alerting in dev
+
+grafana:
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: standard
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  adminPassword: dev-grafana-admin
+  env:
+    GF_LOG_LEVEL: debug
+    GF_USERS_ALLOW_SIGN_UP: "true"
+    GF_AUTH_ANONYMOUS_ENABLED: "true"
+
+# Security settings (relaxed for development)
+security:
+  jwt:
+    secret: dev-jwt-secret-key-not-for-production
+    issuer: iip-dev
+    audience: iip-dev-users
+    expirationTime: 24h
+  cors:
+    allowedOrigins:
+      - "http://localhost:3000"
+      - "https://dev.iip.company.com"
+    allowedMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowCredentials: true
+  networkPolicies:
+    enabled: false  # Disable network policies in dev for easier debugging
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"  # Allow HTTP in dev
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"  # Use staging certs
+  hosts:
+    - host: dev.iip.company.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service:
+            name: frontend
+            port: 80
+        - path: /api
+          pathType: Prefix
+          service:
+            name: kong-proxy
+            port: 80
+  tls:
+    - secretName: iip-dev-tls
+      hosts:
+        - dev.iip.company.com
+
+# Persistent volumes
+persistentVolumes:
+  storageClass: standard
+  accessMode: ReadWriteOnce
+  reclaimPolicy: Delete  # Allow deletion in dev
+
+# Node affinity (relaxed for development)
+nodeAffinity:
+  enabled: false  # Disable node affinity in dev
+
+# Pod disruption budgets (disabled for development)
+podDisruptionBudget:
+  enabled: false
+
+# Development-specific features
+development:
+  debugMode: true
+  hotReload: true
+  mockExternalServices: true
+  seedData: true
+  enableTestEndpoints: true
+  skipTLSVerification: true
+  verboseLogging: true
+
+# External services (mocked or development instances)
+externalServices:
+  mqtt:
+    broker: mqtt://dev-mqtt-broker:1883
+    username: dev-mqtt-user
+    password: dev-mqtt-password
+    tls: false
+  opcua:
+    endpoint: opc.tcp://dev-opcua-server:4840
+    username: dev-opcua-user
+    password: dev-opcua-password
+    security: None
+  weather:
+    apiKey: dev-weather-api-key
+    endpoint: https://api.openweathermap.org/data/2.5
+    mockData: true
+
+# Testing configuration
+testing:
+  enabled: true
+  generateTestData: true
+  testDataInterval: 30s
+  simulateEquipment: true
+  mockSensors: true
+  syntheticAlerts: true

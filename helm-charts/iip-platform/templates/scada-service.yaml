@@ -1,0 +1,280 @@
+{{- if .Values.microservices.scadaService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scada-service
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion }}
+    app.kubernetes.io/component: scada
+    app.kubernetes.io/part-of: iip-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.microservices.scadaService.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scada-service
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scada-service
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/version: {{ .Chart.AppVersion }}
+        app.kubernetes.io/component: scada
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: iip-scada-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - scada-service
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          {{- toYaml .Values.affinity.nodeAffinity.compute | nindent 10 }}
+      tolerations:
+        {{- toYaml .Values.tolerations.infrastructure | nindent 8 }}
+      containers:
+      - name: scada-service
+        image: "{{ .Values.microservices.scadaService.image.repository }}:{{ .Values.microservices.scadaService.image.tag }}"
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 9090
+          protocol: TCP
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: SERVICE_NAME
+          value: "scada-service"
+        - name: SERVICE_VERSION
+          value: {{ .Chart.AppVersion | quote }}
+        - name: ENVIRONMENT
+          value: {{ .Values.global.environment | quote }}
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: POSTGRES_HOST
+          value: "postgresql.iip-infrastructure.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: {{ .Values.postgresql.auth.database | quote }}
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql
+              key: postgres-password
+        - name: REDIS_HOST
+          value: "redis-master.iip-infrastructure.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis
+              key: redis-password
+        - name: RABBITMQ_HOST
+          value: "rabbitmq.iip-infrastructure.svc.cluster.local"
+        - name: RABBITMQ_PORT
+          value: "5672"
+        - name: RABBITMQ_USER
+          value: {{ .Values.rabbitmq.auth.username | quote }}
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq
+              key: rabbitmq-password
+        - name: INFLUXDB_HOST
+          value: "influxdb.iip-infrastructure.svc.cluster.local"
+        - name: INFLUXDB_PORT
+          value: "8086"
+        - name: INFLUXDB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-auth
+              key: admin-token
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: iip-jwt-secret
+              key: secret
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://jaeger-collector.iip-monitoring.svc.cluster.local:14268"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          {{- toYaml .Values.microservices.scadaService.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/cache
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scada-service
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion }}
+    app.kubernetes.io/component: scada
+    app.kubernetes.io/part-of: iip-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8081"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: http
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: grpc
+    protocol: TCP
+    name: grpc
+  - port: 8081
+    targetPort: metrics
+    protocol: TCP
+    name: metrics
+  selector:
+    app.kubernetes.io/name: scada-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+
+{{- if .Values.microservices.scadaService.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: scada-service-hpa
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: scada-service
+  minReplicas: {{ .Values.microservices.scadaService.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.microservices.scadaService.autoscaling.maxReplicas }}
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.microservices.scadaService.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+{{- end }}
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: scada-service
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-service
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: istio
+spec:
+  host: scada-service.iip-applications.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 10
+    loadBalancer:
+      simple: LEAST_CONN
+    outlierDetection:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+{{- end }}

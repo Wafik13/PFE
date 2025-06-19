@@ -1,0 +1,416 @@
+{{- if .Values.istio.enabled }}
+# Istio Gateway
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: iip-gateway
+  namespace: iip-infrastructure
+  labels:
+    app.kubernetes.io/name: istio-gateway
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+    app.kubernetes.io/part-of: iip-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    {{- range .Values.istio.gateway.hosts }}
+    - {{ . | quote }}
+    {{- end }}
+    tls:
+      httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    {{- range .Values.istio.gateway.hosts }}
+    - {{ . | quote }}
+    {{- end }}
+    tls:
+      mode: SIMPLE
+      credentialName: iip-tls-secret
+
+---
+# Virtual Service for Frontend
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: iip-frontend-vs
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: frontend-virtualservice
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+  - {{ index .Values.istio.gateway.hosts 0 }}
+  gateways:
+  - iip-infrastructure/iip-gateway
+  http:
+  - match:
+    - uri:
+        prefix: "/api/"
+    route:
+    - destination:
+        host: kong-proxy.iip-infrastructure.svc.cluster.local
+        port:
+          number: 80
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: gateway-error,connect-failure,refused-stream
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: frontend-service.iip-applications.svc.cluster.local
+        port:
+          number: 80
+    headers:
+      response:
+        add:
+          X-Frame-Options: DENY
+          X-Content-Type-Options: nosniff
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+
+---
+# Virtual Service for SCADA API
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: scada-api-vs
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-virtualservice
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+  - scada.{{ .Values.global.domain }}
+  gateways:
+  - iip-infrastructure/iip-gateway
+  http:
+  - match:
+    - uri:
+        prefix: "/api/v1/scada"
+    route:
+    - destination:
+        host: scada-service.iip-applications.svc.cluster.local
+        port:
+          number: 8080
+        subset: v1
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    timeout: 15s
+    retries:
+      attempts: 3
+      perTryTimeout: 5s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+  - match:
+    - uri:
+        prefix: "/api/v1/control"
+    route:
+    - destination:
+        host: scada-service.iip-applications.svc.cluster.local
+        port:
+          number: 8080
+        subset: v1
+    timeout: 30s
+    headers:
+      request:
+        add:
+          X-Request-Source: "istio-gateway"
+
+---
+# Virtual Service for ML Inference API
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: ml-inference-vs
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: ml-inference-virtualservice
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+  - api.{{ .Values.global.domain }}
+  gateways:
+  - iip-infrastructure/iip-gateway
+  http:
+  - match:
+    - uri:
+        prefix: "/api/v1/ml"
+    route:
+    - destination:
+        host: ml-inference-service.iip-applications.svc.cluster.local
+        port:
+          number: 8080
+    timeout: 60s
+    retries:
+      attempts: 2
+      perTryTimeout: 30s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+  - match:
+    - uri:
+        prefix: "/api/v1/predict"
+    route:
+    - destination:
+        host: ml-inference-service.iip-applications.svc.cluster.local
+        port:
+          number: 8080
+    timeout: 120s
+    headers:
+      request:
+        add:
+          X-ML-Request: "true"
+
+---
+# Destination Rule for SCADA Service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: scada-service-dr
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-destinationrule
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: scada-service.iip-applications.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+        consecutiveGatewayErrors: 5
+        interval: 30s
+        baseEjectionTime: 30s
+        maxEjectionPercent: 50
+        minHealthPercent: 30
+    loadBalancer:
+      simple: LEAST_CONN
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 30
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 50
+
+---
+# Destination Rule for ML Inference Service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: ml-inference-service-dr
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: ml-inference-destinationrule
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: ml-inference-service.iip-applications.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 60s
+      http:
+        http1MaxPendingRequests: 25
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 5
+        maxRetries: 2
+        h2UpgradePolicy: UPGRADE
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 30
+      minHealthPercent: 50
+
+---
+# Service Entry for External MQTT Broker
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-mqtt-broker
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: mqtt-serviceentry
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+  - mqtt.external.com
+  ports:
+  - number: 1883
+    name: mqtt
+    protocol: TCP
+  - number: 8883
+    name: mqtt-tls
+    protocol: TLS
+  location: MESH_EXTERNAL
+  resolution: DNS
+
+---
+# Service Entry for External OPC-UA Server
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-opcua-server
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: opcua-serviceentry
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+  - opcua.factory.local
+  ports:
+  - number: 4840
+    name: opcua
+    protocol: TCP
+  location: MESH_EXTERNAL
+  resolution: DNS
+
+---
+# Authorization Policy for SCADA Control
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: scada-control-policy
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: scada-authz-policy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: security
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scada-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/iip-infrastructure/sa/kong"]
+  - to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/api/v1/scada/*"]
+  - to:
+    - operation:
+        methods: ["POST", "PUT", "DELETE"]
+        paths: ["/api/v1/control/*"]
+    when:
+    - key: request.headers[authorization]
+      values: ["Bearer *"]
+
+---
+# Authorization Policy for ML Inference
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: ml-inference-policy
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: ml-inference-authz-policy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: security
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ml-inference-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/iip-infrastructure/sa/kong"]
+    - source:
+        principals: ["cluster.local/ns/iip-applications/sa/iip-scada-service"]
+  - to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/api/v1/ml/*", "/api/v1/predict/*"]
+
+---
+# Peer Authentication for mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: peer-authentication
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: security
+spec:
+  mtls:
+    mode: STRICT
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: iip-mlops
+  labels:
+    app.kubernetes.io/name: peer-authentication
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: security
+spec:
+  mtls:
+    mode: STRICT
+
+---
+# Request Authentication for JWT
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: jwt-auth
+  namespace: iip-applications
+  labels:
+    app.kubernetes.io/name: request-authentication
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: security
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scada-service
+  jwtRules:
+  - issuer: {{ .Values.security.jwt.issuer }}
+    audiences:
+    - {{ .Values.security.jwt.audience }}
+    jwksUri: "https://{{ .Values.global.domain }}/.well-known/jwks.json"
+    forwardOriginalToken: true
+{{- end }}
